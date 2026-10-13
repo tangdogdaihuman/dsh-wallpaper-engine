@@ -308,9 +308,7 @@ if (token) {
     return res;
   };
   const runClear = async (url, method = 'DELETE') => {
-    // 分桶契约：全清必须显式 `?all=1`（裸 DELETE 是保守 no-op）——本文件的 runClear
-    // 调用全是全清意图 ⇒ 裸 URL 自动补参；带查询串（?ar= / ?clear=1）按字面发。
-    if (!url.includes('?')) url += '?all=1';
+    // 单主帧契约：清除 = 裸 DELETE（删主帧）；POST ?clear=1 是等价别名。
     const req = { url, headers: {}, method };
     const res = fakeRes();
     gpuRoute.handler(req, res);
@@ -329,9 +327,8 @@ if (token) {
     // 残留的其它 key 文件，不算失败。版本取自上面从源码读出的 keyVersion，
     // 写死字面量会在宿主升键后静默测到旧文件（第 514 行的注释即此意）。
     const curKey = keyVersion + '_' + token + '_' + Math.round(statSync(join(fixtureItemDir, 'scene.pkg')).mtimeMs);
-    // 分桶产物名：<key>_ar<b>_gpu.png（b = round(视比×100)，桶号由 PNG 的 IHDR 推导）。
-    // 本段用的 gpuPng 是 64×64 ⇒ 桶 100。
-    const gpuBucketFile = (b) => curKey + '_ar' + b + '_gpu.png';
+    // 主帧产物名：<key>_gpu.png（单槽，面积升级制 —— 只升不降，见 PUT 守卫）。
+    const gpuMasterFile = curKey + '_gpu.png';
     const head0 = await runHead('/wallpaper-engine/scene-frame/' + token);
     check('HEAD 空槽（无抓帧、无自定义画面）→ 404 且不发 X-WE-GPU',
       head0.__state.status === 404 && head0.__state.headers['X-WE-GPU'] === undefined,
@@ -345,11 +342,11 @@ if (token) {
     check('PUT 魔数正确但无 IHDR/IEND → 415', putNoChunks.__state.status === 415, 'status=' + putNoChunks.__state.status);
     const putTooSmall = await runPut('/wallpaper-engine/scene-frame-cache/' + token, makePng(10));
     check('PUT 结构合法但过小（< 1KB 地板）→ 415', putTooSmall.__state.status === 415, 'status=' + putTooSmall.__state.status);
-    check('以上三次拒绝都没有落盘', !existsSync(join(cacheDir, gpuBucketFile(100))), 'ok');
+    check('以上三次拒绝都没有落盘', !existsSync(join(cacheDir, gpuMasterFile)), 'ok');
     const put1 = await runPut('/wallpaper-engine/scene-frame-cache/' + token, gpuPng);
     check('PUT 合法 PNG → 200', put1.__state.status === 200, 'status=' + put1.__state.status);
-    const gpuFiles = readdirSync(cacheDir).filter((f) => f === gpuBucketFile(100));
-    check('GPU frame stored as <key>_ar<b>_gpu.png（按视比分桶，文件名即标记）',
+    const gpuFiles = readdirSync(cacheDir).filter((f) => f === gpuMasterFile);
+    check('GPU frame stored as <key>_gpu.png（单主帧，文件名即标记）',
       gpuFiles.length === 1, gpuFiles.join(', ') || 'missing');
     // v=4（强制自定义画面）：**豁免** GPU 抓帧 —— 用户显式 pin 的来源不被一张抓帧顶掉（§6.2/§6.7）。
     const getV4 = await runHandler(sceneRoute, '/wallpaper-engine/scene-frame/' + token + '?v=4');
@@ -372,19 +369,34 @@ if (token) {
     check('HEAD ?v=3 → X-WE-GPU=1', headV3.__state.status === 204 && headV3.__state.headers['X-WE-GPU'] === '1',
       'status=' + headV3.__state.status + ' gpu=' + headV3.__state.headers['X-WE-GPU']);
     const put2 = await runPut('/wallpaper-engine/scene-frame-cache/' + token, gpuPng);
-    check('second PUT rejected → 409 (每壁纸一份)', put2.__state.status === 409, 'status=' + put2.__state.status);
-    // 并发写入（TOCTOU 的真复现装置）：同 key 串行 → 恰好一 200 一 409。
+    check('second PUT 等面积 → 200（换内容，是「重新截」不是降级）', put2.__state.status === 200,
+      'status=' + put2.__state.status);
+    const put2b = await runPut('/wallpaper-engine/scene-frame-cache/' + token, makePng(4096, 3, [32, 32]));
+    check('明显更小的 PUT → 409 frame-smaller（小帧覆盖不掉大帧，多窗竞态的最后一道闸）',
+      put2b.__state.status === 409 && /frame-smaller/.test(String(put2b.__state.body)),
+      'status=' + put2b.__state.status);
+    const put2c = await runPut('/wallpaper-engine/scene-frame-cache/' + token, gpuPng);
+    check('守卫拒写后等面积重写仍 → 200（守卫不烧槽）', put2c.__state.status === 200,
+      'status=' + put2c.__state.status);
+    // 并发写入（面积守卫的竞态复现装置）：一大两小同槽并发 —— 不论到达顺序，
+    // 结局必须是「大帧在盘上」。小帧若先到会先 200，大帧随后升级覆盖；大帧先到
+    // 则小帧们全被 409 拒掉。**任何顺序下磁盘终态 = 最大帧**，这就是"只升不降"。
     await runClear('/wallpaper-engine/scene-frame-cache/' + token);
     const raced = await Promise.all([
-      runPut('/wallpaper-engine/scene-frame-cache/' + token, makePng(4096, 1)),
-      runPut('/wallpaper-engine/scene-frame-cache/' + token, makePng(4096, 2)),
-      runPut('/wallpaper-engine/scene-frame-cache/' + token, makePng(4096, 3)),
+      runPut('/wallpaper-engine/scene-frame-cache/' + token, makePng(4096, 1, [1440, 900])), // 大帧
+      runPut('/wallpaper-engine/scene-frame-cache/' + token, makePng(4096, 2)),              // 小帧 64×64
+      runPut('/wallpaper-engine/scene-frame-cache/' + token, makePng(4096, 3)),              // 小帧 64×64
     ]);
     const codes = raced.map((r) => r.__state.status).sort().join(',');
-    check('三个并发 PUT 只有一个成功（唯一性闸串行化）', codes === '200,409,409', 'codes=' + codes);
-    const survivor = readdirSync(cacheDir).filter((f) => f === gpuBucketFile(100)).length;
-    check('并发后磁盘上仍只有一份 GPU 帧', survivor === 1, 'count=' + survivor);
-    const noTmpLeft = readdirSync(cacheDir).filter((f) => f.startsWith(gpuBucketFile(100) + '.tmp')).length;
+    const bigPng = makePng(4096, 1, [1440, 900]);
+    check('一大两小并发 PUT：面积守卫把小帧挡在盘外（无论到达顺序）',
+      (codes === '200,409,409' || codes === '200,200,409')
+      && readdirSync(cacheDir).filter((f) => f === gpuMasterFile).length === 1
+      && readFileSync(join(cacheDir, gpuMasterFile)).equals(bigPng),
+      'codes=' + codes);
+    const survivor = readdirSync(cacheDir).filter((f) => f === gpuMasterFile).length;
+    check('并发后磁盘上仍只有一份主帧', survivor === 1, 'count=' + survivor);
+    const noTmpLeft = readdirSync(cacheDir).filter((f) => f.startsWith(gpuMasterFile + '.tmp')).length;
     check('并发写入未残留 .tmp 垃圾', noTmpLeft === 0, 'tmp=' + noTmpLeft);
     // 清除通道：DELETE（以及 POST ?clear=1）→ 可重新抓取。
     const clr = await runClear('/wallpaper-engine/scene-frame-cache/' + token);
@@ -392,7 +404,7 @@ if (token) {
       clr.__state.status === 200 && /"removed":true/.test(String(clr.__state.body)), 'status=' + clr.__state.status);
     const clr2 = await runClear('/wallpaper-engine/scene-frame-cache/' + token, 'POST');
     check('POST 无 clear 参数 → 405（不误触发清除）', clr2.__state.status === 405, 'status=' + clr2.__state.status);
-    const clr3 = await runClear('/wallpaper-engine/scene-frame-cache/' + token + '?clear=1&all=1', 'POST');
+    const clr3 = await runClear('/wallpaper-engine/scene-frame-cache/' + token + '?clear=1', 'POST');
     check('POST ?clear=1 清除路径 → 200',
       clr3.__state.status === 200 && /"removed":false/.test(String(clr3.__state.body)), 'status=' + clr3.__state.status);
     const headAfterClear = await runHead('/wallpaper-engine/scene-frame/' + token);
@@ -460,7 +472,7 @@ if (token) {
         locked && locked.__state.status === 500 && /unlink-failed/.test(String(locked.__state.body)),
         'status=' + (locked && locked.__state.status) + ' body=' + String(locked && locked.__state.body).slice(0, 90));
       check('unlink 失败后 GPU 帧仍在盘上（清除确实没发生）',
-        readdirSync(cacheDir).filter((f) => f === gpuBucketFile(100)).length === 1);
+        readdirSync(cacheDir).filter((f) => f === gpuMasterFile).length === 1);
       const headLocked = await runHead('/wallpaper-engine/scene-frame/' + token);
       check('unlink 失败后 HEAD 仍报 X-WE-GPU=1（与客户端所见一致）',
         headLocked.__state.status === 204 && headLocked.__state.headers['X-WE-GPU'] === '1',
@@ -926,19 +938,19 @@ if (token) {
     return sawContent ? n : 0;
   };
   const slotRet = returnLiteral(slotBody);
-  check('P4-16 槽位返回**恰好四个字段**（key + dir + gpuPath + bucketPath；加/减一个就红）',
-    fieldCount(slotRet) === 4,
+  check('P4-16 槽位返回**恰好三个字段**（key + dir + gpuPath；加/减一个就红）',
+    fieldCount(slotRet) === 3,
     slotRet ? 'fields=' + fieldCount(slotRet) + ' → ' + slotRet.replace(/\s+/g, ' ') : '取不到 return { … }');
   check('P4-16 negative control: 字段计数判据有牙',
     fieldCount('{ key, dir, gpuPath: 1 }') === 3 && fieldCount('{ key, gpuPath: 1 }') === 2
     && fieldCount('{ key, gpuPath: join(dir, key + "_gpu.png") }') === 2
-    && fieldCount('{ key, dir, gpuPath: join(dir, key + "_gpu.png"), bucketPath(ar) { return ""; } }') === 4);
+    && fieldCount('{ key, dir, gpuPath: join(dir, key + "_gpu.png"), extra: 1 }') === 4);
   check('P4-16 sceneFrameSlot 不带档位参数、也不拼 `_v` 后缀（档位语义归调用方）',
     slotBody !== null && /function sceneFrameSlot\(\s*abs\s*\)/.test(slotBody) && !slotBody.includes("'_v'"),
     slotBody === null ? '锚点缺失' : 'arity-ok=' + /function sceneFrameSlot\(\s*abs\s*\)/.test(slotBody));
   check('P4-16 档 4 豁免抓帧时**不解析槽位**（不留那次白做的 statSync + ensureFrameCacheDir）',
     /const slot = variant === 4 \? null : sceneFrameSlot\(abs\);/.test(readFileSync(join(root, 'lib', 'routes', 'scene-frame.js'), 'utf8'))
-    && /const gpuFile = slot \? gpuFrameFileFor\(slot, ar\) : null;/.test(readFileSync(join(root, 'lib', 'routes', 'scene-frame.js'), 'utf8')));
+    && /const gpuFile = slot \? gpuFrameFileFor\(slot\) : null;/.test(readFileSync(join(root, 'lib', 'routes', 'scene-frame.js'), 'utf8')));
 }
 
 // ── Level F: sceneVideo 文件版探测（issue #136）──────────────────────────────

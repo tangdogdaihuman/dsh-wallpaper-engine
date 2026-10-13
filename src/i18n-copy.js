@@ -210,7 +210,6 @@ const WE_I18N_EN = {
   "，冷却 {s}s 后自动重试": ", cooling down for {s}s, then auto-retry",
   "，已达重试上限": ", retry limit reached",
   "拿不到实时画面（这个壁纸没有实时渲染）": "No live frame available (this wallpaper has no live rendering)",
-  "未知": "Unknown",
   "拿不到实时画面（实时渲染没在运行，或渲染页还没画布）": "No live frame available (live rendering is not running, or the render page has no canvas yet)",
   "抓到的画面是空的（实时渲染还在启动中？稍等一两秒再试）": "Captured frame is empty (is live rendering still starting up? Wait a second or two, then try again)",
   "抓到的画面还没有内容（全黑/纯色）→ 已保留原来那张": "Captured frame has no content yet (all black / solid color) → kept the previous one",

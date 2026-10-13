@@ -645,16 +645,6 @@ function frameUrlWithVariant(frameUrl, v) {
   return v > 0 ? base + "?v=" + v : base;
 }
 // 给 scene-frame / scene-frame-cache 的 URL 追加 `?ar=<视口比>`：缓存按视比分桶后，
-// HEAD/DELETE 必须声明"我是哪个形状"，宿主才只对本视比桶操作。ar 判不了（0，如
-// 无头环境）⇒ 原样返回 —— 宿主按旧语义（单槽/任意桶）应答，行为不劣于分桶前。
-// 兼容已有 query（`?v=`）：有 `?` 用 `&` 接。**只用于缓存读写请求**，不落 selection
-// / 持久化 URL（视口比是"哪个窗口"的属性，写进设置就漂了）。
-function frameUrlWithAr(frameUrl, ar) {
-  if (!frameUrl || !(typeof ar === "number" && Number.isFinite(ar) && ar > 0)) return frameUrl;
-  const base = String(frameUrl);
-  return base + (base.indexOf("?") === -1 ? "?" : "&") + "ar=" + ar.toFixed(4);
-}
-
 // ── React hook for the picker UI ────────────────────────────────────────────
 function useStore() {
   const [, setTick] = React.useState(0);
@@ -1882,7 +1872,7 @@ function markGpuFramePin(token, pinned) {
 // 看护心跳、判失败、帧可用性、抓帧回填、指针转发、poster/挂载/抓首帧，以及 syncLayers
 // 与层过渡）。构建期内联回本作用域，调用点无需改动。
 // **故意留在本文件的**（别的域，别处找）：媒体集成（下方「媒体后端」段）、GPU 帧槽助手
-// （refreshStaticFrameNodes / liveViewportAspect / frameUrlWithAr 等）、用户属性、diag 上报。
+// （refreshStaticFrameNodes / liveViewportAspect 等）、用户属性、diag 上报。
 // 契约：出向依赖清单 / 入口 / 不变量 —— 见该文件头（清单只在那里维护，此处不复述数量）。
 
 // ── 媒体后端（宿主侧的系统音频频谱 / Now Playing → 渲染页）─────────────────────
@@ -2181,7 +2171,6 @@ function startMediaSync(frame) {
 // 会在每轮轮播到访时互踢对方的帧，实测永不收敛）。本容差保留为**几何复核**：桶内
 // 帧的 AR 与本窗口视口比差 >2% 时（旧宿主无桶语义 / 异常帧）仍判旧重抓 —— 与渲染
 // 页自己的 fit 容差同口径，2% 以内两个比例的取景/裁切差异不可见。
-const GPU_FRAME_ASPECT_TOL = 0.02;
 // 本会话自己抓过的帧：宿主回了几何头时以头为准，没回（旧宿主）时至少知道自己
 // 刚写的是什么比例，免得「自己刚写的帧被自己判成旧帧」反复清写。
 const gpuFrameAspectKnown = new Map(); // token -> 视口比
@@ -3706,9 +3695,9 @@ function probeGpuFrameState(frameUrl, force) {
   gpuFrameUi.wid = wid;
   gpuFrameUi.probedAt = at;
   const wasPinned = gpuFrameUi.pinned;
-  // 探测带 `?ar=`（本窗口视口比）：分桶宿主只回答"本形状有没有帧" —— 面板的
-  // 「已抓帧/未抓帧」读数与清除/重抓动作作用在同一个桶上，读行动作才一致。
-  apiHead(frameUrlWithAr("/scene-frame/" + encodeURIComponent(token), liveViewportAspect()))
+  // 探测 = 读主帧在不在 + 几何（W/H 头），面板的「已抓帧/未抓帧」读数、清除与
+  // 重抓动作作用在同一份主帧上，读行动作一致。
+  apiHead("/scene-frame/" + encodeURIComponent(token))
     .then((res) => {
       if (gpuFrameUi.wid !== wid || gpuFrameUi.probedAt !== at) return; // 期间切了壁纸
       const rh = res.response;
@@ -4632,16 +4621,9 @@ function WallpaperPicker() {
     gpuFrameUi.wid = wid;
     gpuFrameUi.busy = true;
     emit();
-    // 带 `?ar=`（本窗口视口比）：只清**本视比桶** —— 别的桶属于别的窗口，越权清掉
-    // 就是把他们打回"缺帧回填"（分桶要消灭的乒乓）。视口比判不了（无头/0 盒）时
-    // 改发显式 `?all=1` 全清：宿主对"无形状声明"的 DELETE 保守 no-op，全清必须
-    // 显式声明（评审 P2-4：别让"忘带参数"升级成越权抹除）。已知取舍：此处取窗口
-    // 盒比而回填落桶取 canvas 比——渲染器夹画布的极端场景下面板读写可能差一个
-    // 桶，靠 GET 最近桶回退兜底显示（评审 P2-5，暂不修）。
-    const clearAr = liveViewportAspect();
-    apiDelete(clearAr > 0
-      ? frameUrlWithAr("/scene-frame-cache/" + encodeURIComponent(token), clearAr)
-      : "/scene-frame-cache/" + encodeURIComponent(token) + "?all=1", { parse: true })
+    // 清除 = 删主帧（单主帧语义）。这是共享资源：清掉后其他窗口在下一次回填点
+    // 各自按自己的画布尺寸重抓——与旧单槽时代一致，用户显式点「清除」即此意。
+    apiDelete("/scene-frame-cache/" + encodeURIComponent(token), { parse: true })
       .then((r) => {
         // 真·失败只有一种：宿主 500（unlink 被权限/占用挡住）。`removed:false`
         //（200）在桶语义下 = "本视比桶本来就没有" —— 目标态已达成，按成功走：
