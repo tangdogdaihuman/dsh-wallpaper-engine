@@ -17,8 +17,8 @@
  *                     ROTATION_FADE_MS · commitRotationSwitch · switchTransitionOf · layerKeyDiff ·
  *                     switchFrames · openRotationAudioGate · releaseRotationAudioGateFor ·
  *                     rotationAudioHoldActive · scheduleSceneVideoResync
- *   live 与帧          livePauseReason · GPU_FRAME_AREA_TOL · gpuFrameAspectKnown ·
- *                     liveViewportAspect · probeGpuFrameState · markGpuFramePin · markGpuFrameProbed ·
+ *   live 与帧          livePauseReason · GPU_FRAME_AREA_TOL · probeGpuFrameState ·
+ *                     markGpuFramePin · markGpuFrameProbed ·
  *                     refreshStaticFrameNodes · prepareSceneLiveStage ·
  *                     prepareSceneStaticStage · prepareLiveTimeouts · clearPrepareLiveTimeout ·
  *                     disposePreparedMedia · disposeMediaEl · buildMedia
@@ -972,13 +972,13 @@ function scheduleLiveTransferRetry(wid, attempts) {
 // ── live GPU 抓帧回填静态帧缓存 ─────────────────────────────────────────────
 // 渲染页的显示 canvas 在 DOM 内（data-webwallgl-gl 标记）且 WebGL2 上下文带
 // preserveDrawingBuffer:true —— 父页面同源即可随时 toBlob 抓当前帧，无需渲染
-// 页/上游配合。首帧确认后 2.5s（实时画面进稳态）HEAD 探测静态帧槽位（带
-// `?ar=<本窗口视口比>`，只问**本视比桶**）：
-// - 本视比桶已有帧（X-WE-GPU=1）→ 不动（别的桶里有帧也与我无关，我不清也不读）；
-// - 本桶为空（404）或只有自定义画面（204 + X-WE-GPU=0）→ 抓帧 PUT 回填**自己的桶**：
-//   GPU 帧优先于自定义画面（host 对同桶去重写入，见 /scene-frame-cache）。
+// 页/上游配合。首帧确认后 2.5s（实时画面进稳态）HEAD 探测主帧（裸 URL，拿
+// X-WE-GPU-W/H 算**面积**）：
+// - 主帧面积 ≥ 画布×0.95（X-WE-GPU=1）→ 不动（cover 缩小显示，大帧无损失）；
+// - 主帧缺失（404）、只有自定义画面（204 + X-WE-GPU=0）或明显偏小 ⇒ 抓帧 PUT
+//   覆盖（升级，直写——宿主面积守卫兜底，见 /scene-frame-cache）。
 // 失败路径会清 token，于是下一次 live 首帧（通常来自重新挂载）可以重试；
-// 成功/已被同形状窗口写入（409）则保留 token，避免同一壁纸反复抓帧。
+// 成功/被更大主帧挡下（409 frame-smaller）则保留 token，避免同一壁纸反复抓帧。
 const LIVE_FRAME_BACKFILL_DELAY_MS = 2500;
 // 主帧升级判定的面积容差（与宿主 GPU_FRAME_AREA_TOL 同值同义，两端独立部署）：
 // 主帧面积 ≥ 画布 × 95% 视为"不比画布小"，保留 + cover 缩放，不抓新帧。
@@ -1156,7 +1156,6 @@ function scheduleLiveFrameBackfill(frame, opts) {
         recaptureSize = canvasW + "x" + canvasH;
       }
       if (!ok && force) forceFail(weT("写入失败（宿主返回 {status}）", { status: put && put.status }));
-      if (ok && canvasW > 0) gpuFrameAspectKnown.set(token, canvasW / canvasH);
       return ok;
     })().then((settled) => {
       // 抓帧 + 上传是异步的（多 MB PNG 要 0.1–1s），期间用户可能已经切走：

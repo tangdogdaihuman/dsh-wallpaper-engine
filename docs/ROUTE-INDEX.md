@@ -14,16 +14,16 @@
 
 | # | 路径 | 来源 | 形态 | 依赖（闭包状态 / `c` 字段） | 守卫提及 |
 |---|---|---|---|---|---|
-| 1 | `/inventory` | lib/index.js:3010 | async 箭头 | webServer disposers mediaOriginApi buildInventory | 23 |
+| 1 | `/inventory` | lib/index.js:3007 | async 箭头 | webServer disposers mediaOriginApi buildInventory | 23 |
 | 2 | `/media-info` | lib/routes/media-derived.js:57 | 箭头 | disposers base mediaMap log getMediaInfo faststartVariant …(+1) | 9 |
 | 3 | `/transcode-progress` | lib/routes/media-derived.js:100 | 箭头 | disposers base mediaMap transcodeJobs | 2 |
 | 4 | `/transcoded` | lib/routes/media-derived.js:153 | 箭头 | disposers base mediaMap serveFile transcodeToFps registerTranscodeWaiter | 1 |
 | 5 | `/video-preview` | lib/routes/media-derived.js:212 | 箭头 | disposers base mediaMap serveFile generateVideoPreview | 2 |
 | 6 | `/media` | lib/routes/media-bytes.js:36 | 箭头 | disposers base serveFile serveLayout mediaMap log …(+1) | 21 |
 | 7 | `/preview` | lib/routes/media-bytes.js:36 | 箭头 | disposers base serveFile serveLayout mediaMap log …(+1) | 10 |
-| 8 | `/scene-frame` | lib/routes/scene-frame.js:81 | 箭头 | disposers base mediaMap trackStream customFramePath customIdFromAbs …(+3) | 13 |
-| 9 | `/scene-frame-cache` | lib/routes/scene-frame.js:167 | 箭头 | disposers base mediaMap GPU_FRAME_AREA_TOL GPU_FRAME_MAX_BYTES GPU_WRITE_INFLIGHT …(+7) | 5 |
-| 10 | `/custom-frame` | lib/routes/scene-frame.js:273 | 箭头 | disposers base serveFile CUSTOM_FRAME_EXT CUSTOM_FRAME_MAX_BYTES armBodyIdleTimeout …(+3) | 3 |
+| 8 | `/scene-frame` | lib/routes/scene-frame.js:79 | 箭头 | disposers base mediaMap trackStream customFramePath customIdFromAbs …(+3) | 13 |
+| 9 | `/scene-frame-cache` | lib/routes/scene-frame.js:165 | 箭头 | disposers base mediaMap GPU_FRAME_AREA_TOL GPU_FRAME_MAX_BYTES GPU_WRITE_INFLIGHT …(+7) | 5 |
+| 10 | `/custom-frame` | lib/routes/scene-frame.js:271 | 箭头 | disposers base serveFile CUSTOM_FRAME_EXT CUSTOM_FRAME_MAX_BYTES armBodyIdleTimeout …(+3) | 3 |
 | 11 | `/scene-live` | lib/routes/scene-serve.js:53 | 箭头 | disposers base WEBWALLGL_DIR appendDiagLine traceRequests serveFile …(+1) | 8 |
 | 12 | `/scene-files` | lib/routes/scene-serve.js:91 | 箭头 | disposers base handleSceneFiles | 6 |
 | 13 | `/media-origin` | lib/routes/scene-serve.js:99 | 箭头 | disposers base mediaOriginInfo | 1 |

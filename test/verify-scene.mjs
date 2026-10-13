@@ -413,10 +413,9 @@ if (token) {
       'status=' + headAfterClear.__state.status);
     const put3 = await runPut('/wallpaper-engine/scene-frame-cache/' + token, gpuPng);
     check('清除后可重新写入 → 200（坏帧不再是死结）', put3.__state.status === 200, 'status=' + put3.__state.status);
-    // ── 抓帧几何随 HEAD 暴露（客户端据此判断存帧是否还是当前视口的构图）────
-    // _gpu.png 是抓帧那一刻渲染页视口的构图（渲染器按画布比取景），别的窗口/
-    // 旧会话留下的帧拿到当前窗口上屏会被 CSS object-fit: cover 再裁一次 = 画面
-    // 放大且四周被切。IHDR 的宽高比就是抓帧画布的设备像素比 → 直接读文件头即可。
+    // ── 抓帧几何随 HEAD 暴露（客户端面积升级判定的数据源 + 人类可读的诊断）────
+    // _gpu.png 的 IHDR 就是抓帧画布的设备像素尺寸：客户端拿 W/H 算主帧面积
+    //（≥ 画布×0.95 保留缩放，否则升级重抓），人也能直接看出这张帧是哪个视口抓的。
     const headGeo64 = await runHead('/wallpaper-engine/scene-frame/' + token);
     check('HEAD 报出抓帧几何（X-WE-GPU-W/H/AR，来自 PNG IHDR）',
       headGeo64.__state.headers['X-WE-GPU-AR'] === '1.0000'
@@ -427,7 +426,7 @@ if (token) {
     const putWide = await runPut('/wallpaper-engine/scene-frame-cache/' + token, makePng(4096, 7, [1440, 960]));
     check('PUT 3:2 抓帧（1440x960）→ 200', putWide.__state.status === 200, 'status=' + putWide.__state.status);
     const headGeoWide = await runHead('/wallpaper-engine/scene-frame/' + token);
-    check('HEAD 报出 3:2 抓帧几何（1.5000 → 客户端判「与 16:9 视口不符」→ 重抓）',
+    check('HEAD 报出 3:2 抓帧几何（1.5000 —— 小视口抓的帧，客户端会按面积升级覆盖）',
       headGeoWide.__state.status === 204 && headGeoWide.__state.headers['X-WE-GPU-AR'] === '1.5000',
       'ar=' + headGeoWide.__state.headers['X-WE-GPU-AR']);
     const headGeoNoGpu = await (async () => {
@@ -938,7 +937,7 @@ if (token) {
     return sawContent ? n : 0;
   };
   const slotRet = returnLiteral(slotBody);
-  check('P4-16 槽位返回**恰好三个字段**（key + dir + gpuPath；加/减一个就红）',
+  check('P4-16 槽位返回**恰好三个字段**（key + dir + gpuPath；加/减一个就红）—— dir 目前仅作路径上下文保留',
     fieldCount(slotRet) === 3,
     slotRet ? 'fields=' + fieldCount(slotRet) + ' → ' + slotRet.replace(/\s+/g, ' ') : '取不到 return { … }');
   check('P4-16 negative control: 字段计数判据有牙',

@@ -34,6 +34,8 @@ function assertChildren(children) {
 //     不得反复清写。
 //   L 单主帧契约：HEAD/PUT 均为裸 URL（无形状参数）；自动路径零 DELETE
 //    （DELETE 仅「重新截」force 路径使用）。
+//   M PUT 撞上更大主帧（宿主面积守卫 409 frame-smaller）⇒ 视为已定局：不重试、
+//    不报错、槽位记账照常（别处有更大的帧，显示只会更好）。
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
@@ -54,7 +56,7 @@ const runStep = (label, fn) => {
 };
 
 /** 启动一个独立 client 实例并跑到「回填定时器已触发」为止。 */
-async function runScenario({ mode = 'varied', blobSize = 120000, gpuAlreadyPinned = false, toBlobFails = false, liveStall = false, gpuDims = null, viewport = { w: 1920, h: 1080 }, canvasSize = { w: 1920, h: 1080 }, clearFails = false }) {
+async function runScenario({ mode = 'varied', blobSize = 120000, gpuAlreadyPinned = false, toBlobFails = false, liveStall = false, gpuDims = null, viewport = { w: 1920, h: 1080 }, canvasSize = { w: 1920, h: 1080 }, clearFails = false, putRejectsSmaller = false }) {
   const byId = {};
   const timers = [];
   const intervals = [];
@@ -163,7 +165,13 @@ async function runScenario({ mode = 'varied', blobSize = 120000, gpuAlreadyPinne
     }
     if (m === 'PUT') {
       // 只记回填端点的 PUT —— client 自己还会 PUT /settings（持久化）。
-      if (u.includes('/scene-frame-cache/')) { putCalls.push({ url:u, body:opts.body }); slotOrder.push('PUT'); }
+      if (u.includes('/scene-frame-cache/')) {
+        putCalls.push({ url:u, body:opts.body }); slotOrder.push('PUT');
+        if (putRejectsSmaller) {
+          // 宿主面积守卫：来帧比盘上主帧小 ⇒ 409 frame-smaller（守卫拒写）。
+          return Promise.resolve({ ok:false, status:409, json:()=>Promise.resolve({ error:'frame-smaller' }) });
+        }
+      }
       return Promise.resolve({ ok:true, status:200, json:()=>Promise.resolve({ ok:true }) });
     }
     return Promise.resolve({ ok:true, status:200, json:()=>Promise.resolve(
@@ -376,6 +384,17 @@ console.log('L. 单主帧契约：裸 URL，自动路径零 DELETE');
   check('升级路径零 DELETE（DELETE 仅「重新截」force 使用）',
     r2.clearCalls.length === 0 && r2.putCalls.length === 1,
     'clear=' + r2.clearCalls.length + ' put=' + r2.putCalls.length);
+}
+
+console.log('M. PUT 撞更大主帧（面积守卫 409）⇒ 已定局：不重试不报错，记账照常');
+{
+  const r = await runScenario({ mode: 'varied', blobSize: 120000, gpuAlreadyPinned: true,
+    gpuDims: { w: 480, h: 320 }, putRejectsSmaller: true });
+  check('升级 PUT 恰好一次（409 不触发重试）', r.putCalls.length === 1, 'put=' + r.putCalls.length);
+  check('409 路径零 DELETE（没有"先删再试"的死循环）', r.clearCalls.length === 0,
+    'clear=' + r.clearCalls.length);
+  check('409 视为已定局：槽位记账照常（下次挂载不再重复抓帧）',
+    r.slotOrder.join('>') === 'PUT', r.slotOrder.join('>') || 'none');
 }
 
 console.log('F. P2-M：GPU 静帧落地后不得有任何 CPU 渲染（该路线已删除）');

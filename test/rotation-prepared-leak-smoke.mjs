@@ -930,7 +930,7 @@ const posterShowsFrame = (t, poster, src) => {
   const m = /url\(["']?([^"')]+)["']?\)/.exec(posterBgSrc(t, poster));
   return Boolean(m) && m[1].split('?')[0] === src;
 };
-// 留存表键 = 完整帧 URL（含 ?ar=）⇒ 判据先归一到路径再断言。
+// 留存表键 = 完整帧 URL ⇒ 判据归一到路径再断言（历史键曾带 ?ar=，归一保持兼容）。
 const frameBytesPaths = (t) => {
   const b = t.frameBytes();
   return b ? new Map([...b.entries()].map(([k, v]) => [String(k).split('?')[0], v])) : null;
@@ -948,7 +948,7 @@ await runScenario('P. 首帧前垫底图：抓帧 → 作者预览图 → 主题
   const probeFrame = posterProbeForFrame(t, frameSrc);
   check('① 垫底图先试**实时抓帧**（当前视口的真实构图优先于预览图）',
     !!probeFrame, 'probe=' + (probeFrame ? t.mediaSrc(probeFrame) : 'none'));
-  check('   来源已记录（诊断能看出退到哪一级；带 ?ar= 的分桶形态）',
+  check('   来源已记录（诊断能看出退到哪一级）',
     !!poster && String(poster.dataset.weFrameSrc || '').split('?')[0] === frameSrc,
     'weFrameSrc=' + (poster ? poster.dataset.weFrameSrc : 'no poster'));
   // 首次激活：抓帧不存在（这一轮 live 才回填）⇒ 必须退到作者预览图
